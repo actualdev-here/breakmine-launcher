@@ -1,0 +1,86 @@
+{
+ "id": "p1",
+ "name": "Ruby \"Mod\"",
+ "modId": "ruby",
+ "author": "me",
+ "version": "1.0.0",
+ "description": "Gems\nand more",
+ "license": "",
+ "icon": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+ "blocks": [
+  {
+   "key": "ruby_block",
+   "name": "Ruby Block",
+   "texture": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+   "hardness": 1.5,
+   "light": 7,
+   "sound": "glass",
+   "transparent": true,
+   "unbreakable": false
+  },
+  {
+   "key": "ruby_block_2",
+   "name": "B2",
+   "texture": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+   "hardness": 1,
+   "light": 0,
+   "sound": "stone",
+   "unbreakable": true
+  }
+ ],
+ "items": [
+  {
+   "key": "ruby",
+   "name": "Ruby",
+   "texture": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+  }
+ ],
+ "recipes": [
+  {
+   "result": "ruby_block",
+   "count": 2,
+   "shapeless": false,
+   "grid": [
+    0,
+    5,
+    0,
+    0,
+    5,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "result": "ruby",
+   "count": 1,
+   "shapeless": true,
+   "grid": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    3
+   ]
+  }
+ ],
+ "commands": [
+  {
+   "name": "ruby",
+   "description": "hi",
+   "reply": "§aHello\n\"quoted\"\n\n  "
+  }
+ ],
+ "patches": [
+  {
+   "file": "./src/js/net/minecraft/client/Foo.js",
+   "source": "exports.x = 1;\n"
+  }
+ ],
+ "code": "  minecraft.addMessageToChat(\"hi\");\n\nlet a = 1;  "
+}

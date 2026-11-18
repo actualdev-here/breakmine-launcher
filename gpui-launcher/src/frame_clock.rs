@@ -1,7 +1,7 @@
 //! Reuse CPU-rendered images between animation frames.
 use std::{cell::Cell, time::{Duration, Instant}};
 
-const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+const FRAME_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Default)]
 pub struct FrameClock {

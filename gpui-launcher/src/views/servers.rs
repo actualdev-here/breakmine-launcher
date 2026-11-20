@@ -99,14 +99,19 @@ impl Launcher {
             self.v.servers.polling = true;
             let timer = cx.background_executor().clone();
             cx.spawn(async move |view, cx| {
+              let mut ticks = 0u8;
               loop {
                 timer.timer(Duration::from_secs(3)).await;
+                ticks = (ticks + 1) % 5;
                 let keep = view
                     .update(cx, |this, cx| {
                         if this.route == crate::app::Route::Servers {
                             if this.v.servers.tab == "hosted" {
                                 this.load_hosted();
                                 cx.notify();
+                            }
+                            if ticks == 0 {
+                                this.refresh_server_pings(cx);
                             }
                         }
                         true

@@ -80,12 +80,21 @@ fn query_websocket(address: &str) -> Result<Status, String> {
         let payload: serde_json::Value = text
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or(serde_json::Value::Null);
+        let names = payload["playerNames"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str())
+            .filter(|name| !name.is_empty() && name.chars().count() <= 32)
+            .take(100)
+            .map(str::to_string)
+            .collect();
         let icon = payload["icon"].as_str().and_then(decode_icon);
         return Ok(Status {
             latency_ms: start.elapsed().as_millis().max(1) as u64,
             players: payload["players"].as_u64(),
             max_players: payload["maxPlayers"].as_u64(),
-            player_names: Vec::new(),
+            player_names: names,
             icon,
         });
     }
@@ -169,13 +178,13 @@ mod tests {
             assert_eq!(socket.read().unwrap().into_text().unwrap(), "ping");
             socket
                 .send(Message::Text(
-                    r#"{"players":2,"maxPlayers":20,"icon":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/WZ8AAAAASUVORK5CYII="}"#.into(),
+                    r#"{"players":2,"maxPlayers":20,"playerNames":["Alex","Steve"],"icon":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/WZ8AAAAASUVORK5CYII="}"#.into(),
                 ))
                 .unwrap();
         });
         let status = query(&format!("ws://{addr}"), "binary").unwrap();
         assert_eq!((status.players, status.max_players), (Some(2), Some(20)));
-        assert!(status.player_names.is_empty());
+        assert_eq!(status.player_names, ["Alex", "Steve"]);
         assert_eq!(
             status.icon.as_ref().map(|(format, _)| format.as_str()),
             Some("png")

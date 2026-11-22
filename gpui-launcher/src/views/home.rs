@@ -321,6 +321,9 @@ impl Launcher {
             rows = rows.child(self.inst_row(n, item, !stacked, cx));
         }
         let strip = self.strip(cx);
+        let mascot_on = !self.store.pointer("/settings/hideHomeMascot").and_then(|v| v.as_bool()).unwrap_or(false);
+        let mascot_size = (stage_h * if vw <= 650. { 0.40 } else { 0.48 }).clamp(76., 170.);
+        let mascot_bottom = if strip.is_some() { 76. } else { 10. };
         let main = div()
             .flex_1()
             .min_w_0()
@@ -338,6 +341,12 @@ impl Launcher {
                         .border_1()
                         .border_color(c(0x1f1f1f))
                         .child(assets::rounded_cover(hero_art(&art), 17., 0.5, 0.45))
+                        .when(mascot_on, |d| d.child(
+                            div().debug_selector(|| "home-mascot".into()).absolute().right(px(10.)).bottom(px(mascot_bottom))
+                                .size(px(mascot_size))
+                                .child(img(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/home-mascot.png"))
+                                    .size_full().object_fit(gpui::ObjectFit::Contain)),
+                        ))
                         .children(strip),
                 ),
             )
@@ -457,3 +466,38 @@ impl Launcher {
     }
 }
 
+#[cfg(test)]
+mod mascot_layout_tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn mascot_stays_inside_art(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| crate::layout_test_launcher(cx));
+        cx.update(|_, app| view.update(app, |launcher, _| {
+            launcher.route = Route::Home;
+        }));
+        for width in [480., 1280.] {
+            cx.simulate_resize(gpui::size(px(width), px(720.)));
+            cx.refresh().unwrap();
+            let art = cx.debug_bounds("home-art").expect("art panel rendered");
+            let mascot = cx.debug_bounds("home-mascot").expect("mascot rendered");
+            assert!(mascot.left() >= art.left() && mascot.right() <= art.right());
+            assert!(mascot.top() >= art.top() && mascot.bottom() <= art.bottom());
+        }
+    }
+
+    #[gpui::test]
+    fn mascot_can_be_hidden(cx: &mut TestAppContext) {
+        let (_view, cx) = cx.add_window_view(|_, cx| {
+            let mut launcher = crate::layout_test_launcher(cx);
+            launcher.route = Route::Home;
+            launcher.store["settings"]["hideHomeMascot"] = true.into();
+            launcher
+        });
+        cx.simulate_resize(gpui::size(px(900.), px(720.)));
+        cx.refresh().unwrap();
+        assert!(cx.debug_bounds("home-art").is_some());
+        assert!(cx.debug_bounds("home-mascot").is_none());
+    }
+}

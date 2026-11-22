@@ -372,6 +372,7 @@ impl Launcher {
 
     fn look_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let art = self.setting_str("homeArt");
+        let show_mascot = !self.setting_bool("hideHomeMascot");
         let art = if art.is_empty() { "classic".to_string() } else { art };
         let mut choices = div().flex().flex_wrap().gap(px(12.));
         for (id, label, src) in [("classic", "Classic", "assets/game/beta_art.webp"), ("sky", "Sky", "assets/game/hoof_sky.png"), ("launcher", "Day & Night", "assets/game/launcher_art.png")] {
@@ -399,6 +400,11 @@ impl Launcher {
             .p(px(20.))
             .gap(px(22.))
             .child(div().flex().flex_col().gap(px(12.)).child(div().flex().flex_col().gap(px(3.)).child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child("Home artwork")).child(sub_text("Choose the picture on the Home page · art by Hoof"))).child(choices))
+            .child(set_row("Show home mascot", Some(sub_text("Show the little miner on your Home artwork")),
+                switch("sw-home-mascot", show_mascot).on_click(cx.listener(move |this, _, _, cx| {
+                    this.set_setting("hideHomeMascot", json!(show_mascot));
+                    cx.notify();
+                })), false))
             .child(self.toggle_row("reduceMotion", "Reduce motion", "Turn off hover and launch animations", false, cx))
             .into_any_element()
     }

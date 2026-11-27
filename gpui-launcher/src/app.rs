@@ -350,7 +350,9 @@ impl Launcher {
     }
 
     pub fn save_store(&mut self) {
-        if let Err(e) = crate::store::write_json(&crate::gpui_store_path(), &self.store) {
+        let result = crate::credential_store::protect_legacy_accounts(&mut self.store)
+            .and_then(|_| crate::store::write_json(&crate::gpui_store_path(), &crate::credential_store::without_legacy_tokens(&self.store)));
+        if let Err(e) = result {
             self.notice = Some(format!("Couldn't save launcher settings: {e}"));
         }
     }

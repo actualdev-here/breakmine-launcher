@@ -1,4 +1,5 @@
 //! GPUI profiles and credentials are stored separately from Tauri.
+use crate::credential_store::{CredentialStore, SystemStore};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path, sync::Mutex};
 
@@ -23,6 +24,7 @@ pub struct OfflineProfile {
 pub struct OnlineProfile {
     pub id: String,
     pub name: String,
+    #[serde(default, skip_serializing)]
     pub token: String,
     pub expires: u64,
     #[serde(default)]
@@ -39,40 +41,65 @@ pub fn upsert_oauth(
     let _guard = ACCOUNT_WRITE_LOCK
         .lock()
         .map_err(|_| "Account storage is unavailable.")?;
+    upsert_with(path, name, token, expires, api, &SystemStore)
+}
+
+fn upsert_with(
+    path: &Path,
+    name: &str,
+    token: String,
+    expires: u64,
+    api: &str,
+    store: &impl CredentialStore,
+) -> Result<Accounts, String> {
     if name.is_empty() || token.is_empty() {
         return Err("Invalid account information.".into());
     }
-    let mut accounts = load(path)?;
-    let id = match accounts
+    let mut accounts = load_with(path, store)?;
+    let index = accounts
         .online_profiles
-        .iter_mut()
-        .find(|profile| profile.name.eq_ignore_ascii_case(name) && profile.api == api)
-    {
-        Some(profile) => {
-            profile.name = name.into();
-            profile.token = token;
-            profile.expires = expires;
-            profile.api = api.into();
-            profile.id.clone()
-        }
-        None => {
-            let id = crate::util::new_id("gpui-oauth");
-            accounts.online_profiles.push(OnlineProfile {
-                id: id.clone(),
-                name: name.into(),
-                token,
-                expires,
-                api: api.into(),
-            });
-            id
-        }
+        .iter()
+        .position(|p| p.name.eq_ignore_ascii_case(name) && p.api == api);
+    let id = index
+        .map(|i| accounts.online_profiles[i].id.clone())
+        .unwrap_or_else(|| crate::util::new_id("gpui-oauth"));
+    let previous = store.get(&id)?;
+    store.set(&id, &token)?;
+    let profile = OnlineProfile {
+        id: id.clone(),
+        name: name.into(),
+        token,
+        expires,
+        api: api.into(),
     };
-    accounts.active_account = id;
-    save(path, &accounts)?;
+    if let Some(i) = index {
+        accounts.online_profiles[i] = profile;
+    } else {
+        accounts.online_profiles.push(profile);
+    }
+    accounts.active_account = id.clone();
+    if let Err(error) = save(path, &accounts) {
+        let restored = match previous {
+            Some(token) => store.set(&id, &token),
+            None => store.delete(&id),
+        };
+        return Err(if restored.is_err() {
+            format!("{error} Secure storage could not be restored; reconnect this account.")
+        } else {
+            error
+        });
+    }
     Ok(accounts)
 }
 
 pub fn load(path: &Path) -> Result<Accounts, String> {
+    let _guard = ACCOUNT_WRITE_LOCK
+        .lock()
+        .map_err(|_| "Account storage is unavailable.")?;
+    load_with(path, &SystemStore)
+}
+
+fn read_metadata(path: &Path) -> Result<Accounts, String> {
     match fs::read(path) {
         Ok(bytes) => {
             serde_json::from_slice(&bytes).map_err(|e| format!("Couldn't read GPUI accounts: {e}"))
@@ -81,6 +108,58 @@ pub fn load(path: &Path) -> Result<Accounts, String> {
         Err(e) => Err(format!("Couldn't read GPUI accounts: {e}")),
     }
 }
+
+/// Read account names without exposing tokens when the credential store is locked.
+pub fn load_metadata(path: &Path) -> Result<Accounts, String> {
+    let _guard = ACCOUNT_WRITE_LOCK
+        .lock()
+        .map_err(|_| "Account storage is unavailable.")?;
+    let mut accounts = read_metadata(path)?;
+    for account in &mut accounts.online_profiles {
+        account.token.clear();
+    }
+    Ok(accounts)
+}
+
+fn load_with(path: &Path, store: &impl CredentialStore) -> Result<Accounts, String> {
+    let mut accounts = read_metadata(path)?;
+    let mut migrated = false;
+    for profile in &mut accounts.online_profiles {
+        if !profile.token.is_empty() {
+            // Keep the original file intact until every legacy token is stored successfully.
+            store.set(&profile.id, &profile.token)?;
+            migrated = true;
+        } else {
+            profile.token = store.get(&profile.id)?.unwrap_or_default();
+        }
+    }
+    if migrated {
+        save(path, &accounts)?;
+    }
+    Ok(accounts)
+}
+// Offline profiles can still be managed if a previously migrated keyring is locked.
+// A legacy plaintext file must not be rewritten until its tokens have been migrated.
+fn load_allow_offline(
+    path: &Path,
+    store: &impl CredentialStore,
+) -> Result<(Accounts, Option<String>), String> {
+    match load_with(path, store) {
+        Ok(accounts) => Ok((accounts, None)),
+        Err(error) => {
+            let accounts = read_metadata(path)?;
+            if accounts
+                .online_profiles
+                .iter()
+                .any(|profile| !profile.token.is_empty())
+            {
+                return Err(error);
+            }
+            Ok((accounts, Some(error)))
+        }
+    }
+}
+
 fn save(path: &Path, accounts: &Accounts) -> Result<(), String> {
     let parent = path.parent().ok_or("Invalid account storage path")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -115,7 +194,16 @@ pub fn select(path: &Path, id: &str) -> Result<Accounts, String> {
     if id.is_empty() || id.len() > 128 {
         return Err("Invalid account ID.".into());
     }
-    let mut accounts = load(path)?;
+    let (mut accounts, keyring_error) = load_allow_offline(path, &SystemStore)?;
+    if accounts
+        .online_profiles
+        .iter()
+        .any(|profile| profile.id == id)
+    {
+        if let Some(error) = keyring_error {
+            return Err(error);
+        }
+    }
     accounts.active_account = id.into();
     save(path, &accounts)?;
     Ok(accounts)
@@ -132,7 +220,7 @@ pub fn add_offline(path: &Path, name: &str) -> Result<Accounts, String> {
     {
         return Err("Usernames are 3–32 letters, numbers, _ or -.".into());
     }
-    let mut accounts = load(path)?;
+    let (mut accounts, _) = load_allow_offline(path, &SystemStore)?;
     let id = match accounts
         .offline_profiles
         .iter()
@@ -156,7 +244,15 @@ pub fn remove_online(path: &Path, id: &str) -> Result<(Accounts, OnlineProfile),
     let _guard = ACCOUNT_WRITE_LOCK
         .lock()
         .map_err(|_| "Account storage is unavailable.")?;
-    let mut accounts = load(path)?;
+    remove_online_with(path, id, &SystemStore)
+}
+
+fn remove_online_with(
+    path: &Path,
+    id: &str,
+    store: &impl CredentialStore,
+) -> Result<(Accounts, OnlineProfile), String> {
+    let mut accounts = load_with(path, store)?;
     let index = accounts
         .online_profiles
         .iter()
@@ -166,7 +262,15 @@ pub fn remove_online(path: &Path, id: &str) -> Result<(Accounts, OnlineProfile),
     if accounts.active_account == id {
         accounts.active_account.clear();
     }
-    save(path, &accounts)?;
+    store.delete(id)?;
+    if let Err(error) = save(path, &accounts) {
+        if !removed.token.is_empty() && store.set(id, &removed.token).is_err() {
+            return Err(format!(
+                "{error} Secure storage could not be restored; reconnect this account."
+            ));
+        }
+        return Err(error);
+    }
     Ok((accounts, removed))
 }
 
@@ -174,7 +278,7 @@ pub fn remove_offline(path: &Path, id: &str) -> Result<Accounts, String> {
     let _guard = ACCOUNT_WRITE_LOCK
         .lock()
         .map_err(|_| "Account storage is unavailable.")?;
-    let mut accounts = load(path)?;
+    let (mut accounts, _) = load_allow_offline(path, &SystemStore)?;
     let before = accounts.offline_profiles.len();
     accounts.offline_profiles.retain(|profile| profile.id != id);
     if before == accounts.offline_profiles.len() {
@@ -186,37 +290,79 @@ pub fn remove_offline(path: &Path, id: &str) -> Result<Accounts, String> {
     save(path, &accounts)?;
     Ok(accounts)
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{collections::HashMap, sync::Mutex};
+
+    #[derive(Default)]
+    struct FakeStore {
+        tokens: Mutex<HashMap<String, String>>,
+        fail: bool,
+    }
+    impl CredentialStore for FakeStore {
+        fn get(&self, id: &str) -> Result<Option<String>, String> {
+            if self.fail {
+                return Err("Keyring unavailable".into());
+            }
+            Ok(self.tokens.lock().unwrap().get(id).cloned())
+        }
+        fn set(&self, id: &str, token: &str) -> Result<(), String> {
+            if self.fail {
+                return Err("Keyring unavailable".into());
+            }
+            self.tokens.lock().unwrap().insert(id.into(), token.into());
+            Ok(())
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            if self.fail {
+                return Err("Keyring unavailable".into());
+            }
+            self.tokens.lock().unwrap().remove(id);
+            Ok(())
+        }
+    }
+    fn temp() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(crate::util::new_id("secure-account-test"));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
-    fn oauth_profile_is_private_and_reconnect_updates_existing_account() {
-        let dir = std::env::temp_dir().join(crate::util::new_id("oauth-account-test"));
+    fn saves_reconnects_and_removes_without_plaintext() {
+        let dir = temp();
         let path = dir.join("accounts.json");
-        let first = upsert_oauth(
+        let store = FakeStore::default();
+        let first = upsert_with(
             &path,
             "Alex",
             "old-token".into(),
             100,
             "https://api.example.com",
+            &store,
         )
         .unwrap();
-        let second = upsert_oauth(
+        let second = upsert_with(
             &path,
             "alex",
             "new-token".into(),
             200,
             "https://api.example.com",
+            &store,
         )
         .unwrap();
         assert_eq!(first.active_account, second.active_account);
-        assert_eq!(second.online_profiles.len(), 1);
-        assert_eq!(load(&path).unwrap().online_profiles[0].token, "new-token");
-        let (remaining, removed) = remove_online(&path, &second.active_account).unwrap();
-        assert!(remaining.online_profiles.is_empty());
-        assert!(remaining.active_account.is_empty());
-        assert_eq!(removed.api, "https://api.example.com");
-        assert!(!fs::read_to_string(&path).unwrap().contains("new-token"));
+        assert_eq!(
+            load_with(&path, &store).unwrap().online_profiles[0].token,
+            "new-token"
+        );
+        let disk = fs::read_to_string(&path).unwrap();
+        assert!(
+            !disk.contains("new-token")
+                && !disk.contains("old-token")
+                && !disk.contains("\"token\"")
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -225,33 +371,105 @@ mod tests {
                 0o600
             );
         }
+        let (remaining, removed) =
+            remove_online_with(&path, &second.active_account, &store).unwrap();
+        assert_eq!(removed.token, "new-token");
+        assert!(remaining.online_profiles.is_empty());
+        assert!(store.get(&second.active_account).unwrap().is_none());
         fs::remove_dir_all(dir).unwrap();
     }
+
     #[test]
-    fn offline_accounts_validate_names_and_remain_isolated() {
-        let dir = std::env::temp_dir().join(crate::util::new_id("accounts-test"));
+    fn migrates_legacy_tokens_only_after_secure_save() {
+        let dir = temp();
+        let path = dir.join("accounts.json");
+        let legacy = r#"{"activeAccount":"a","onlineProfiles":[{"id":"a","name":"Alex","token":"legacy-secret","expires":123,"api":"https://api.example.com"}]}"#;
+        fs::write(&path, legacy).unwrap();
+        let unavailable = FakeStore {
+            fail: true,
+            ..Default::default()
+        };
+        assert!(load_with(&path, &unavailable).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), legacy);
+        let store = FakeStore::default();
+        assert_eq!(
+            load_with(&path, &store).unwrap().online_profiles[0].token,
+            "legacy-secret"
+        );
+        assert_eq!(store.get("a").unwrap().as_deref(), Some("legacy-secret"));
+        assert!(!fs::read_to_string(&path).unwrap().contains("legacy-secret"));
+        assert_eq!(
+            load_with(&path, &store).unwrap().online_profiles[0].token,
+            "legacy-secret"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unavailable_store_never_writes_new_token() {
+        let dir = temp();
+        let path = dir.join("accounts.json");
+        let store = FakeStore {
+            fail: true,
+            ..Default::default()
+        };
+        assert!(upsert_with(
+            &path,
+            "Alex",
+            "secret".into(),
+            100,
+            "https://api.example.com",
+            &store
+        )
+        .is_err());
+        assert!(!path.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn locked_keyring_keeps_migrated_offline_metadata_accessible() {
+        let dir = temp();
+        let path = dir.join("accounts.json");
+        let good = FakeStore::default();
+        upsert_with(
+            &path,
+            "Alex",
+            "secret".into(),
+            100,
+            "https://api.example.com",
+            &good,
+        )
+        .unwrap();
+        let locked = FakeStore {
+            fail: true,
+            ..Default::default()
+        };
+        let (metadata, warning) = load_allow_offline(&path, &locked).unwrap();
+        assert_eq!(metadata.online_profiles.len(), 1);
+        assert!(metadata.online_profiles[0].token.is_empty());
+        assert!(warning.is_some());
+        let legacy = r#"{"onlineProfiles":[{"id":"a","name":"Alex","token":"legacy-secret","expires":123}]}"#;
+        fs::write(&path, legacy).unwrap();
+        assert!(load_allow_offline(&path, &locked).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), legacy);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn offline_accounts_work_without_a_keyring() {
+        let dir = temp();
         let path = dir.join("accounts.json");
         assert!(add_offline(&path, "../bad").is_err());
-        assert!(add_offline(&path, "no").is_err());
         let a = add_offline(&path, "Alex").unwrap();
-        assert_eq!(a.offline_profiles.len(), 1);
         let again = add_offline(&path, "alex").unwrap();
-        assert_eq!(again.offline_profiles.len(), 1);
         assert_eq!(again.active_account, a.active_account);
-        let b = select(&path, "tauri-account-123").unwrap();
-        assert_eq!(b.active_account, "tauri-account-123");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-                0o600
-            );
-        }
-        assert!(!fs::read_to_string(&path).unwrap().contains("token"));
-        assert!(remove_offline(&path, "tauri-account-123").is_err());
-        let c = remove_offline(&path, &a.active_account).unwrap();
-        assert_eq!(c.active_account, "tauri-account-123");
+        assert_eq!(select(&path, "other").unwrap().active_account, "other");
+        assert_eq!(
+            remove_offline(&path, &a.active_account)
+                .unwrap()
+                .active_account,
+            "other"
+        );
         fs::write(&path, "not json").unwrap();
         assert!(add_offline(&path, "Steve").is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), "not json");

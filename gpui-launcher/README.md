@@ -39,7 +39,7 @@ Run these commands from the repository root. The game itself runs in `game-host`
 
 - Existing instances, mods, skins, projects, older versions, and hosted servers stay in their current folders.
 - Settings, servers, the skins list, and the inbox fall back to the legacy `launcher.json` until GPUI saves its own `gpui-launcher.json`.
-- Legacy accounts are read-only. New OAuth, password, and offline profiles are stored in `gpui-accounts.json` with mode 0600 on Unix. Tokens are stored unencrypted.
+- Legacy accounts remain read-only in GPUI. Profile metadata is stored in `gpui-accounts.json` with mode 0600 on Unix; tokens are kept in the system credential store. Existing GPUI tokens are migrated when the launcher starts. The original legacy launcher files are not modified and may still contain their own tokens.
 - GPUI stores each instance's worlds and in-game settings in its own `profile-gpui` directory.
 
 ## Known limitations

@@ -3,6 +3,7 @@ mod app;
 mod assets;
 mod catalog;
 mod creator;
+mod credential_store;
 mod game_launch;
 mod frame_clock;
 mod host;
@@ -127,7 +128,13 @@ impl Launcher {
     fn load(cx: &mut Context<Self>) -> Self {
         // GPUI keeps its own copy of the launcher store once it changes anything.
         let own = read_json(gpui_store_path());
-        let store = if own.is_object() { own } else { read_json(launcher_data().join("launcher.json")) };
+        let has_own = own.is_object();
+        let mut store = if has_own { own } else { read_json(launcher_data().join("launcher.json")) };
+        let legacy_error = match credential_store::protect_legacy_accounts(&mut store) {
+            Ok(true) if has_own => crate::store::write_json(&gpui_store_path(), &credential_store::without_legacy_tokens(&store)).err(),
+            Ok(_) => None,
+            Err(error) => Some(error),
+        };
         let game_dir = store
             .pointer("/settings/gameDir")
             .and_then(Value::as_str)
@@ -144,7 +151,7 @@ impl Launcher {
             .to_string();
         let (account_prefs, account_error) = match local_accounts::load(&gpui_accounts_path()) {
             Ok(accounts) => (accounts, None),
-            Err(error) => (local_accounts::Accounts::default(), Some(error)),
+            Err(error) => (local_accounts::load_metadata(&gpui_accounts_path()).unwrap_or_default(), Some(error)),
         };
         let mut launcher = Self {
             route: Route::Home,
@@ -162,7 +169,7 @@ impl Launcher {
             store,
             game_dir,
             selected,
-            notice: account_error,
+            notice: account_error.or(legacy_error),
             account_prefs,
             game: None,
             game_starting: false,
@@ -295,9 +302,14 @@ impl Launcher {
         let prefs = match local_accounts::load(&gpui_accounts_path()) {
             Ok(prefs) => prefs,
             Err(error) => {
-                self.notice = Some(error);
-                cx.notify();
-                return;
+                let metadata = local_accounts::load_metadata(&gpui_accounts_path()).unwrap_or_default();
+                let local_offline = metadata.offline_profiles.iter().any(|account| account.id == selected_account);
+                let legacy_offline = store["accounts"].as_array().into_iter().flatten().any(|account| account["id"].as_str() == Some(&selected_account) && account["offline"].as_bool() == Some(true));
+                if local_offline || legacy_offline { metadata } else {
+                    self.notice = Some(error);
+                    cx.notify();
+                    return;
+                }
             }
         };
         self.game_starting = true;
@@ -478,6 +490,9 @@ impl Launcher {
         if latest["accounts"].is_array() {
             self.store["accounts"] = latest["accounts"].clone();
             self.store["activeAccount"] = latest["activeAccount"].clone();
+            if let Err(error) = credential_store::protect_legacy_accounts(&mut self.store) {
+                self.notice = Some(error);
+            }
         }
         match local_accounts::load(&gpui_accounts_path()) {
             Ok(accounts) => self.account_prefs = accounts,

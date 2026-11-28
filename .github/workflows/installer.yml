@@ -1,0 +1,54 @@
+name: Build installer from release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag containing the Windows ZIP
+        required: true
+        default: v0.1.0-beta.1
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download release ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          gh release download "$env:RELEASE_TAG" --pattern Breakmine-Launcher-Windows-x64.zip --dir dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Expand-Archive -Path dist/Breakmine-Launcher-Windows-x64.zip -DestinationPath dist/installer-input
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" gpui-launcher/packaging/windows-installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test installation and uninstall
+        shell: pwsh
+        run: |
+          $destination = Join-Path $env:RUNNER_TEMP 'BreakmineInstallerTest'
+          $setup = Resolve-Path dist/Breakmine-Launcher-Windows-x64-Setup.exe
+          $process = Start-Process $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOICONS', "/DIR=`"$destination`"") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          foreach ($file in @('breakmine-launcher.exe', 'breakmine-game-host.exe', 'WebView2Loader.dll', 'assets/game/default_skin.png', 'launcher.ico')) {
+            if (-not (Test-Path (Join-Path $destination $file))) { throw "Missing installed file: $file" }
+          }
+          $sourceHash = (Get-FileHash 'dist/installer-input/Breakmine Launcher/breakmine-launcher.exe').Hash
+          if ((Get-FileHash (Join-Path $destination 'breakmine-launcher.exe')).Hash -ne $sourceHash) { throw 'Installed launcher does not match release ZIP' }
+          $uninstaller = Join-Path $destination 'unins000.exe'
+          $process = Start-Process $uninstaller -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Uninstall failed: $($process.ExitCode)" }
+          if (Test-Path (Join-Path $destination 'breakmine-launcher.exe')) { throw 'Uninstall did not remove launcher' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Breakmine-Launcher-Windows-x64-Setup
+          path: dist/Breakmine-Launcher-Windows-x64-Setup.exe
+          if-no-files-found: error

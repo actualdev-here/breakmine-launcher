@@ -19,6 +19,9 @@ keyring = { version = "3.6.3", features = ["sync-secret-service", "crypto-rust",
 ureq = { version = "2", features = ["json"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
+[build-dependencies]
+embed-resource = "3.0.12"
+
 [dev-dependencies]
 gpui = { version = "=0.2.2", features = ["test-support"] }
 

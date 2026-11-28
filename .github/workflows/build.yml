@@ -23,6 +23,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo build --locked --release --manifest-path gpui-launcher/game-host/Cargo.toml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify launcher icon
+        shell: pwsh
+        run: |
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class IconResources {
+              [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+              public static extern uint ExtractIconEx(string file, int index, IntPtr large, IntPtr small, uint count);
+          }
+          '@
+          $exe = (Resolve-Path gpui-launcher/target/release/breakmine-gpui.exe).Path
+          if ([IconResources]::ExtractIconEx($exe, -1, [IntPtr]::Zero, [IntPtr]::Zero, 0) -lt 1) {
+            throw 'Launcher executable has no icon resource'
+          }
       - name: Package Windows build
         shell: pwsh
         run: |

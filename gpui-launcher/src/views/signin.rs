@@ -383,8 +383,8 @@ impl Launcher {
                             .flex()
                             .items_center()
                             .gap(px(12.))
-                            .child(img(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/mojang-mark.svg")).size(px(22.)))
-                            .child(img(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/microsoft-mark.svg")).size(px(14.))),
+                            .child(img(assets::launcher_path("mojang-mark.svg")).size(px(22.)))
+                            .child(img(assets::launcher_path("microsoft-mark.svg")).size(px(14.))),
                     )
                     .child(div().text_size(px(10.)).text_color(c(DIM2)).line_height(gpui::relative(1.5)).text_center().child("Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.")),
             );

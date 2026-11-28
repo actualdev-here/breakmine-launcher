@@ -683,6 +683,7 @@ name = "breakmine-gpui"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "dirs 5.0.1",
  "getrandom 0.2.17",
  "gpui",
  "image",

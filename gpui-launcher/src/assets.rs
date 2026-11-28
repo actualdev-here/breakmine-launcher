@@ -11,9 +11,31 @@ use std::{
     sync::Arc,
 };
 
-/// A file under the project's `src/` folder, e.g. `assets/game/launcher_logo.png`.
+/// Locate assets next to a packaged executable or inside a macOS app bundle.
+fn packaged_assets(executable: &Path) -> Option<PathBuf> {
+    let dir = executable.parent()?;
+    [dir.join("assets"), dir.join("../Resources/assets")]
+        .into_iter()
+        .find(|candidate| candidate.join("game/default_skin.png").is_file())
+}
+
+fn packaged_root() -> Option<&'static PathBuf> {
+    static ROOT: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| std::env::current_exe().ok().and_then(|exe| packaged_assets(&exe))).as_ref()
+}
+
+/// A shared launcher asset, also available when running from a source checkout.
 pub fn path(rel: &str) -> PathBuf {
+    if let Some(root) = packaged_root() {
+        return root.join(rel.strip_prefix("assets/").unwrap_or(rel));
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src").join(rel)
+}
+
+/// A launcher-specific asset such as a font or the home mascot.
+pub fn launcher_path(rel: &str) -> PathBuf {
+    if let Some(root) = packaged_root() { return root.join(rel); }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets").join(rel)
 }
 
 thread_local! {
@@ -194,6 +216,24 @@ fn cover_canvas(key: String, source: impl Fn() -> Option<image::RgbaImage> + 'st
 #[cfg(test)]
 mod cover_tests {
     use super::cover_rect;
+    #[test]
+    fn finds_packaged_assets_beside_binary_and_in_mac_bundle() {
+        use super::packaged_assets;
+        let root = std::env::temp_dir().join(crate::util::new_id("asset-layout-test"));
+        let desktop = root.join("desktop");
+        std::fs::create_dir_all(desktop.join("assets/game")).unwrap();
+        std::fs::write(desktop.join("assets/game/default_skin.png"), b"test").unwrap();
+        assert_eq!(packaged_assets(&desktop.join("launcher")), Some(desktop.join("assets")));
+        let mac = root.join("Launcher.app/Contents");
+        std::fs::create_dir_all(mac.join("MacOS")).unwrap();
+        std::fs::create_dir_all(mac.join("Resources/assets/game")).unwrap();
+        std::fs::write(mac.join("Resources/assets/game/default_skin.png"), b"test").unwrap();
+        let found = packaged_assets(&mac.join("MacOS/launcher")).unwrap();
+        assert_eq!(std::fs::canonicalize(found).unwrap(), std::fs::canonicalize(mac.join("Resources/assets")).unwrap());
+        assert!(packaged_assets(&root.join("missing/launcher")).is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn cover_crop_is_positioned_and_within_source() {
         assert_eq!(cover_rect(400, 200, 100, 100, 0.5, 0.5), Some((100, 0, 200, 200)));

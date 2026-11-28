@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Breakmine Launcher
+Comment=Launch Breakmine
+Exec=breakmine-launcher
+Icon=breakmine-launcher
+Categories=Game;
+Terminal=false

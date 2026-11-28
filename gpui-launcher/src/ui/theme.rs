@@ -30,7 +30,7 @@ pub fn ca(hex: u32) -> Hsla {
 
 /// Inter (four weights cut from the variable font), JetBrains Mono and the Breakmine pixel font.
 pub fn load_fonts(cx: &mut App) {
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/fonts");
+    let dir = crate::assets::launcher_path("fonts");
     let fonts: Vec<Cow<'static, [u8]>> = std::fs::read_dir(&dir)
         .into_iter()
         .flatten()

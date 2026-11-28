@@ -344,7 +344,7 @@ impl Launcher {
                         .when(mascot_on, |d| d.child(
                             div().debug_selector(|| "home-mascot".into()).absolute().right(px(10.)).bottom(px(mascot_bottom))
                                 .size(px(mascot_size))
-                                .child(img(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/home-mascot.png"))
+                                .child(img(assets::launcher_path("home-mascot.png"))
                                     .size_full().object_fit(gpui::ObjectFit::Contain)),
                         ))
                         .children(strip),

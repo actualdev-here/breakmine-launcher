@@ -14,6 +14,7 @@ serde = { version = "1", features = ["derive"] }
 base64 = "0.22"
 sha2 = "0.10"
 getrandom = "0.2"
+dirs = "5.0.1"
 keyring = { version = "3.6.3", features = ["sync-secret-service", "crypto-rust", "apple-native", "windows-native"] }
 ureq = { version = "2", features = ["json"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }

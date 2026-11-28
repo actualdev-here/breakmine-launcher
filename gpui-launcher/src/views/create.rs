@@ -1777,7 +1777,7 @@ impl Launcher {
     // ── files ────────────────────────────────────────────────────────────
 
     fn save_dialog(&mut self, name: String, ext: &'static str, cx: &mut Context<Self>, write: impl FnOnce(std::path::PathBuf) -> Result<(), String> + 'static, done: impl FnOnce(&mut Launcher, std::path::PathBuf, &mut Context<Launcher>) + 'static) {
-        let dir = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+        let dir = dirs::home_dir().unwrap_or_default();
         let prompt = cx.prompt_for_new_path(&dir, Some(&name));
         cx.spawn(async move |view, cx| {
             let Ok(Ok(Some(mut path))) = prompt.await else { return };

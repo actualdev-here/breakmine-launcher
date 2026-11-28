@@ -117,11 +117,7 @@ pub(crate) fn gpui_store_path() -> PathBuf {
     launcher_data().join("gpui-launcher.json")
 }
 pub(crate) fn launcher_data() -> PathBuf {
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")
-        });
+    let base = dirs::data_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".local/share"));
     base.join("com.breakmine.launcher")
 }
 impl Launcher {
@@ -140,7 +136,7 @@ impl Launcher {
             .and_then(Value::as_str)
             .map(PathBuf::from)
             .unwrap_or_else(|| {
-                PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".breakmine")
+                dirs::home_dir().unwrap_or_default().join(".breakmine")
             });
         let game_dir = game_dir.to_string_lossy().into_owned();
         let instances = instances::list(&game_dir);
@@ -543,7 +539,7 @@ impl Launcher {
             .collect();
         entries.push((
             "__default_skin".into(),
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src/assets/game/default_skin.png"),
+            assets::path("assets/game/default_skin.png"),
             false,
         ));
         let executor = cx.background_executor().clone();
